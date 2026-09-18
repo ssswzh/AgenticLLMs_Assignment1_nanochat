@@ -41,7 +41,7 @@ python -m scripts.tok_train_group28 --max-chars 500_000_000 --vocab-size 32768 -
 
 To test how vocabulary size affect compression ratio and sequence length for a fixed text sample, run the following script. This script also include numbers, source code, and non-English text for answering subtask 1.4.
 ```bash
-python -m group28.task1_evaluate_tokenizer 
+python -m group28.task1_evaluate_tokenizer --output group28_results/task1_tokenizer_evaluation_results.tsv
 ```
 
 
