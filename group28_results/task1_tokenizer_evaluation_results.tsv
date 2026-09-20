@@ -1,0 +1,9 @@
+Text Type	Vocabulary Size	Text Length	Token Length	Compression Ratio
+english	8192	1453	405	0.2787
+english	32768	1453	321	0.2209
+numbers	8192	39	24	0.6154
+numbers	32768	39	24	0.6154
+source_code	8192	63	30	0.4762
+source_code	32768	63	28	0.4444
+non_english	8192	193	577	2.9896
+non_english	32768	193	515	2.6684
