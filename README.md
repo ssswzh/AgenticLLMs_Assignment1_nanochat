@@ -45,6 +45,18 @@ python -m group28.task1_evaluate_tokenizer --output group28_results/task1_tokeni
 ```
 
 
-
-
 ## Task 2: Pre-training
+
+We used 10 shards download in *Task 1* (approx. 2B characters), rerun a tokenizer. 
+```bash
+python -m scripts.tok_train
+```
+
+Use slightly modified script `scripts.base_train_group28` to log the training process. Set `--depth=2` for pre-training. The pre-trained model is stored in `$NANOCHAT_BASE_DIR/models/`. Set `--device-batch-size 16` to avoid OOM.
+```bash
+# Default data ratio
+python -m scripts.base_train --depth 2 --save-every 500 --target-param-data-ratio 12 --model-tag depth2_dataratio12 --device-batch-size 16
+# Chinchilla data ratio
+python -m scripts.base_train --depth 2 --save-every 500 --target-param-data-ratio 20 --model-tag depth2_dataratio20 --device-batch-size 16
+```
+
