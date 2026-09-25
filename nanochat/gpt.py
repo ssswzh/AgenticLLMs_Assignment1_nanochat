@@ -60,6 +60,7 @@ def apply_rotary_emb(x, cos, sin):
     assert x.ndim == 4  # multihead attention
     d = x.shape[3] // 2
     x1, x2 = x[..., :d], x[..., d:] # split up last dim into two halves
+    # rotate matrix multiplication: [[cos sin], [-sin cos]] @ [x1; x2]
     y1 = x1 * cos + x2 * sin # rotate pairs of dims
     y2 = x1 * (-sin) + x2 * cos
     return torch.cat([y1, y2], 3)
@@ -96,7 +97,8 @@ class CausalSelfAttention(nn.Module):
             gate = 3 * torch.sigmoid(self.ve_gate(x[..., :self.ve_gate_channels]))  # (B, T, n_kv_head), range (0, 3)
             v = v + gate.unsqueeze(-1) * ve
 
-        # Apply Rotary Embeddings to queries and keys to get relative positional encoding
+        # Apply Rotary Position Embeddings to queries and keys to get relative positional encoding
+        # rotate Q and K by -theta
         cos, sin = cos_sin
         q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
         q, k = norm(q), norm(k) # QK norm
@@ -119,6 +121,7 @@ class CausalSelfAttention(nn.Module):
                 window_size=window_size,
             )
             # Advance position after last layer processes
+            # only update the cache position after the last layer, so that all layers see the same position
             if self.layer_idx == kv_cache.n_layers - 1:
                 kv_cache.advance(T)
 
@@ -148,6 +151,9 @@ class Block(nn.Module):
         self.mlp = MLP(config)
 
     def forward(self, x, ve, cos_sin, window_size, kv_cache):
+        """
+        Pre-Norm residual block: norm -> attn -> add -> norm -> mlp -> add
+        """
         x = x + self.attn(norm(x), ve, cos_sin, window_size, kv_cache)
         x = x + self.mlp(norm(x))
         return x
@@ -272,13 +278,15 @@ class GPT(nn.Module):
         # autodetect the device from model embeddings
         if device is None:
             device = self.transformer.wte.weight.device
-        # stride the channels
+        # stride the channels by 2
         channel_range = torch.arange(0, head_dim, 2, dtype=torch.float32, device=device)
+        # inverse frequency for each channel pair (2 channels share the same frequency), represents the rotation speed for each channel pair
         inv_freq = 1.0 / (base ** (channel_range / head_dim))
         # stride the time steps
         t = torch.arange(seq_len, dtype=torch.float32, device=device)
         # calculate the rotation frequencies at each (time, channel) pair
         freqs = torch.outer(t, inv_freq)
+        # rotate Q and K based on absolute position and rotation frequency, then use the vector angle to get the relative position
         cos, sin = freqs.cos(), freqs.sin()
         cos, sin = cos.to(COMPUTE_DTYPE), sin.to(COMPUTE_DTYPE)
         cos, sin = cos[None, :, None, :], sin[None, :, None, :] # add batch and head dims for later broadcasting
@@ -457,6 +465,15 @@ class GPT(nn.Module):
         return optimizer
 
     def forward(self, idx, targets=None, kv_cache=None, loss_reduction='mean'):
+        """
+        Input:
+        - idx: (B, T) tensor of token indices
+        - targets: (B, T) tensor of target token indices for loss computation
+        - kv_cache: KVCache object for inference
+        - loss_reduction: 'mean' or 'sum' for cross-entropy loss reduction
+        """
+
+        # B: batch size, T: sequence length, C: embedding dimension, V: vocab size
         B, T = idx.size()
 
         # Grab the rotary embeddings for the current sequence length (they are of shape (1, seq_len, 1, head_dim/2))
@@ -464,17 +481,22 @@ class GPT(nn.Module):
         assert idx.device == self.cos.device, f"Rotary embeddings and idx are on different devices: {idx.device} != {self.cos.device}"
         assert self.cos.dtype == COMPUTE_DTYPE, f"Rotary embeddings must be in {COMPUTE_DTYPE}, got {self.cos.dtype}"
         # if kv cache exists, we need to offset the rotary embeddings to the current position in the cache
+        # usually in training process, kv_cache is None and we use the full sequence length, but in inference with kv_cache, we need to use the current position in the cache
         T0 = 0 if kv_cache is None else kv_cache.get_pos()
         cos_sin = self.cos[:, T0:T0+T], self.sin[:, T0:T0+T] # truncate cache to current sequence length
 
-        # Embed the tokens
-        x = self.transformer.wte(idx) # embed current token
+        # Embed the tokens, (B, T) -> (B, T, C)
+        x = self.transformer.wte(idx) # embed current token, from token to embedded vector
         x = x.to(COMPUTE_DTYPE) # ensure activations are in compute dtype (no-op usually, but active for fp16 code path)
         x = norm(x)
 
         # Smear: mix previous token's embedding into current position (cheap bigram info)
         if kv_cache is None:
             # Training / naive generate: full sequence available, use fast slice
+            # sizes: 
+            #   x[:, 1:, :24] = (B, T-1, 24)
+            #   smear_gate: 24->1, gate = (B, T-1, 1)
+            #   x[:, :-1] = (B, T-1, C)
             assert T > 1, "Training forward pass should have T > 1"
             gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, 1:, :24]))
             x = torch.cat([x[:, :1], x[:, 1:] + gate * x[:, :-1]], dim=1)
@@ -497,26 +519,38 @@ class GPT(nn.Module):
         backout_layer = n_layer // 2  # cache at halfway point
         x_backout = None
         for i, block in enumerate(self.transformer.h):
+            # Apply per-layer residual scaling and x0 blending, shallow layers get more x0 blending, deeper layers get less
+            # resid_lambda from 1.15->1.05, x0_lambda from 0.2->0.05
             x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
+            # get value embedding for even layers (and last layer)
             ve = self.value_embeds[str(i)](idx).to(x.dtype) if str(i) in self.value_embeds else None
             x = block(x, ve, cos_sin, self.window_sizes[i], kv_cache)
+            # save the mid-layer residual for backout at the halfway point
             if i == backout_layer:
                 x_backout = x
         # Subtract mid-layer residual to remove low-level features before logit projection
         if x_backout is not None:
             x = x - self.backout_lambda.to(x.dtype) * x_backout
-        x = norm(x)
+        x = norm(x) # (B, T, C) <- final normalized residual stream
 
         # Forward the lm_head (compute logits)
         softcap = 15 # smoothly cap the logits to the range [-softcap, softcap]
         logits = self.lm_head(x) # (B, T, padded_vocab_size) <- very big tensor, large amount of memory
         logits = logits[..., :self.config.vocab_size] # slice to remove padding
+        # BF16 is used in the calculation of Transformer matrices that are "large in quantity but allow a small amount of error"
+        # FP32 is used in softmax and cross-entropy calculations where the data volume is relatively small but sensitive to errors, thereby balancing training speed, video memory and stability
         logits = logits.float() # switch to fp32 for logit softcap and loss computation
+        # Softcap the logits to avoid extreme values that can destabilize training, z' = 15 tanh(z / 15)
+        # z->inf: z' = 15, z->-inf: z' = -15, z=0: z'=0, z=15: z'=14.9, z=-15: z'=-14.9
         logits = softcap * torch.tanh(logits / softcap) # squash the logits
 
         if targets is not None:
             # training: given the targets, compute and return the loss
             # TODO experiment with chunked cross-entropy?
+            # targets: (B, T) tensor of target token indices
+            # logits: (B, T, vocab_size) tensor of logits
+            # each token position is a classification problem over vocab_size classes, so we can flatten the batch and sequence dimensions to compute cross-entropy loss
+            # ignore_index=-1: ignore the positions where targets are -1 (padding or masked positions)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction=loss_reduction)
             return loss
         else:
