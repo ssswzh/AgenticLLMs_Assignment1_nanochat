@@ -19,7 +19,7 @@ import torch
 from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, get_base_dir, autodetect_device_type, get_peak_flops, COMPUTE_DTYPE, COMPUTE_DTYPE_REASON, is_ddp_initialized
 from nanochat.tokenizer import get_token_bytes
 from nanochat.checkpoint_manager import save_checkpoint, load_model, load_optimizer_state
-from nanochat.loss_eval import evaluate_bpb
+from nanochat.loss_eval import evaluate_metric
 import torch.distributed as dist
 from nanochat.flash_attention import HAS_FA3
 from nanochat.engine import Engine
@@ -341,15 +341,18 @@ while True:
         model.eval()
         val_loader = build_val_loader()
         eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len * ddp_world_size)
-        val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
-        print0(f"Step {step:05d} | Validation bpb: {val_bpb:.4f}")
-        if val_bpb < min_val_bpb:
-            min_val_bpb = val_bpb
+        val_metric = evaluate_metric(model, val_loader, eval_steps, token_bytes)
+        print0(f"Step {step:05d} | Validation bpb: {val_metric['bpb']:.4f}")
+        if val_metric['bpb'] < min_val_bpb:
+            min_val_bpb = val_metric['bpb']
         wandb_run.log({
             "step": step,
             "total_training_flops": flops_so_far,
             "total_training_time": total_training_time,
-            "val/bpb": val_bpb,
+            "val/loss": val_metric['loss'],
+            "val/bpb": val_metric['bpb'],
+            "val/total_tokens": val_metric['total_tokens'],
+            "val/total_bytes": val_metric['total_bytes'],
         })
         model.train()
 

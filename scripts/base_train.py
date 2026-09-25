@@ -30,10 +30,11 @@ from nanochat.dataloader import tokenizing_distributed_data_loader_bos_bestfit, 
 from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, print_banner, get_base_dir, autodetect_device_type, get_peak_flops, COMPUTE_DTYPE, COMPUTE_DTYPE_REASON, is_ddp_initialized
 from nanochat.tokenizer import get_tokenizer, get_token_bytes
 from nanochat.checkpoint_manager import save_checkpoint, load_checkpoint
-from nanochat.loss_eval import evaluate_bpb
+from nanochat.loss_eval import evaluate_metric
 from nanochat.engine import Engine
 from nanochat.flash_attention import HAS_FA3
 from scripts.base_eval import evaluate_core
+from scripts.json_handle import write_json, append_jsonl
 print_banner()
 
 # -----------------------------------------------------------------------------
@@ -154,6 +155,16 @@ model.init_weights() # 3) All tensors get initialized
 base_dir = get_base_dir()
 output_dirname = args.model_tag if args.model_tag else f"d{args.depth}" # e.g. d12
 checkpoint_dir = os.path.join(base_dir, "base_checkpoints", output_dirname)
+if master_process:
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+# output json files
+metrics_path = os.path.join(checkpoint_dir, "metrics.jsonl")
+samples_path = os.path.join(checkpoint_dir, "samples.jsonl")
+core_metrics_path = os.path.join(checkpoint_dir, "core_metrics.jsonl")
+run_config_path = os.path.join(checkpoint_dir, "run_config.json")
+summary_path = os.path.join(checkpoint_dir, "summary.json")
+
 resuming = args.resume_from_step != -1
 if resuming:
     print0(f"Resuming optimization from step {args.resume_from_step}")
@@ -331,6 +342,8 @@ dataloader_resume_state_dict = None if not resuming else meta_data["dataloader_s
 train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(tokenizer, args.device_batch_size, args.max_seq_len, split="train", device=device, resume_state_dict=dataloader_resume_state_dict)
 build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(tokenizer, args.device_batch_size, args.max_seq_len, split="val", device=device)
 x, y, dataloader_state_dict = next(train_loader) # kick off load of the very first batch of data
+# build a train loader for evaluating bites-per-byte (bpb) on training data, and compare it with the val bpb
+build_train_eval_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(tokenizer, args.device_batch_size, args.max_seq_len, split="train", device=device)
 
 # -----------------------------------------------------------------------------
 # Calculate the number of iterations we will train for and set up the various schedulers
@@ -360,10 +373,13 @@ print0(f"Total training FLOPs estimate: {num_flops_per_token * total_tokens:e}")
 def get_lr_multiplier(it):
     warmup_iters = args.warmup_steps
     warmdown_iters = round(args.warmdown_ratio * num_iterations)
+    # warmup: linear increase from 0 to 1 over warmup_iters
     if it < warmup_iters:
         return (it + 1) / warmup_iters
+    # constant lr
     elif it <= num_iterations - warmdown_iters:
         return 1.0
+    # warmdown: linear decrease from 1 to final_lr_frac over warmdown_iters
     else:
         progress = (num_iterations - it) / warmdown_iters
         return progress * 1.0 + (1 - progress) * args.final_lr_frac
@@ -372,21 +388,30 @@ def get_lr_multiplier(it):
 def get_muon_momentum(it):
     warmdown_iters = round(args.warmdown_ratio * num_iterations)
     warmdown_start = num_iterations - warmdown_iters
+    # warmup: linear increase from 0.85 to 0.97 over first 400 iterations
     if it < 400:
         frac = it / 400
         return (1 - frac) * 0.85 + frac * 0.97
+    # warmdown: linear decrease from 0.97 to 0.90 over warmdown_iters
     elif it >= warmdown_start:
         progress = (it - warmdown_start) / warmdown_iters
         return 0.97 * (1 - progress) + 0.90 * progress
+    # constant momentum of 0.97 during the main training phase
     else:
         return 0.97
 
 # Weight decay scheduler for Muon optimizer (cosine decay to zero over the course of training)
 def get_weight_decay(it):
+    # decrease weight decay from weight_decay_scaled to 0 over the course of training using a cosine schedule
     return weight_decay_scaled * 0.5 * (1 + math.cos(math.pi * it / num_iterations))
+
 
 # -----------------------------------------------------------------------------
 # Training loop
+
+# important when --eval-every=-1
+train_metric = None
+val_metric = None
 
 # Loop state (variables updated by the training loop)
 if not resuming:
@@ -412,6 +437,31 @@ print0(f"Tokens / micro-batch / rank: {args.device_batch_size} x {args.max_seq_l
 print0(f"Tokens / micro-batch: {world_tokens_per_fwdbwd:,}")
 print0(f"Total batch size {total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
 
+# Record hyperparameters and model config to the checkpoint directory for reproducibility
+if master_process:
+    run_config = {
+        "model_tag": output_dirname,
+        "user_config": user_config,
+        "model_config": model_config_kwargs,
+        "vocab_size": vocab_size,
+        "parameter_counts": param_counts,
+        "num_scaling_params": num_scaling_params,
+        "num_flops_per_token": num_flops_per_token,
+        "num_iterations": num_iterations,
+        "target_tokens": target_tokens,
+        "total_tokens": total_tokens,
+        "target_param_data_ratio": args.target_param_data_ratio,
+        "actual_param_data_ratio": total_tokens / num_scaling_params,
+        "total_batch_size": total_batch_size,
+        "device_batch_size": args.device_batch_size,
+        "world_size": ddp_world_size,
+        "grad_accum_steps": grad_accum_steps,
+        "estimated_total_flops": num_flops_per_token * total_tokens,
+        "checkpoint_dir": checkpoint_dir,
+    }
+    write_json(run_config_path, run_config)
+
+
 # Go!
 while True:
     last_step = step == num_iterations # loop runs num_iterations+1 times so that we can eval/save at the end
@@ -420,19 +470,49 @@ while True:
     # once in a while: evaluate the val bpb (all ranks participate)
     if args.eval_every > 0 and (last_step or step % args.eval_every == 0):
         model.eval()
+        train_eval_loader = build_train_eval_loader() # Group28
         val_loader = build_val_loader()
         eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len * ddp_world_size)
         with disable_fp8(model):
-            val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
-        print0(f"Step {step:05d} | Validation bpb: {val_bpb:.6f}")
-        if val_bpb < min_val_bpb:
-            min_val_bpb = val_bpb
+            train_metric = evaluate_metric(model, train_eval_loader, eval_steps, token_bytes)
+            train_bpb = train_metric['bpb']
+            val_metric = evaluate_metric(model, val_loader, eval_steps, token_bytes)
+            val_bpb = val_metric['bpb']
+        print0(f"Step {step:05d} | Training bpb: {train_metric['bpb']:.6f}")
+        print0(f"Step {step:05d} | Validation bpb: {val_metric['bpb']:.6f}")
+        min_val_bpb = min(min_val_bpb, val_bpb) # keep track of the best validation bpb
         wandb_run.log({
             "step": step,
             "total_training_flops": flops_so_far,
             "total_training_time": total_training_time,
-            "val/bpb": val_bpb,
+            "train/loss": train_metric['loss'],
+            "train/bpb": train_metric['bpb'],
+            "train/total_tokens": train_metric['total_tokens'],
+            "train/total_bytes": train_metric['total_bytes'],
+            "val/loss": val_metric['loss'],
+            "val/bpb": val_metric['bpb'],
+            "val/total_tokens": val_metric['total_tokens'],
+            "val/total_bytes": val_metric['total_bytes'],
+            "bpb_gap": val_metric['bpb'] - train_metric['bpb'],
+            "min_val_bpb": min_val_bpb
         })
+        # save the metrics to a jsonl file for later analysis
+        if master_process:
+            append_jsonl(metrics_path, {
+                "step": step,
+                "total_training_flops": flops_so_far,
+                "total_training_time": total_training_time,
+                "train_loss": train_metric["loss"],
+                "train_bpb": train_metric["bpb"],
+                "train_total_tokens": train_metric["total_tokens"],
+                "train_total_bytes": train_metric["total_bytes"],
+                "val_loss": val_metric["loss"],
+                "val_bpb": val_metric["bpb"],
+                "val_total_tokens": val_metric["total_tokens"],
+                "val_total_bytes": val_metric["total_bytes"],
+                "bpb_gap": val_metric["bpb"] - train_metric["bpb"],
+                "min_val_bpb": min_val_bpb
+            })
         model.train()
 
     # once in a while: estimate the CORE metric (all ranks participate)
@@ -450,6 +530,14 @@ while True:
             "core_metric": results["core_metric"],
             "centered_results": results["centered_results"],
         })
+        # save core metric results
+        if master_process:
+            append_jsonl(core_metrics_path, {
+                "step": step,
+                "total_training_flops": flops_so_far,
+                "core_metric": results["core_metric"],
+                "centered_results": results["centered_results"],
+            })
         model.train()
 
     # once in a while: sample from the model (only on master process)
@@ -466,11 +554,27 @@ while True:
             "If 5*x + 3 = 13, then x is",
         ]
         engine = Engine(orig_model, tokenizer) # use orig_model to avoid recompilation
+        # save sample output
+        sample_records = []
         for prompt in prompts:
             tokens = tokenizer(prompt, prepend="<|bos|>")
             with disable_fp8(orig_model):
                 sample, _ = engine.generate_batch(tokens, num_samples=1, max_tokens=16, temperature=0)
-            print0(tokenizer.decode(sample[0]))
+            # decode the sample, print and save
+            output_text = tokenizer.decode(sample[0])
+            print0(output_text)
+
+            sample_records.append({
+                "step": step,
+                "prompt": prompt,
+                "output": output_text,
+                "temperature": 0,
+                "max_tokens": 16
+            })
+        # output sample records to json file
+        if master_process:
+            for record in sample_records:
+                append_jsonl(samples_path, record)
         model.train()
 
     # save checkpoint: at the end of the run, or every save_every steps, except at the first step or the resume step
@@ -482,6 +586,17 @@ while True:
             optimizer.state_dict(), # optimizer state
             { # metadata saved as json
                 "step": step,
+                "parameter_counts": param_counts,
+                "num_scaling_params": num_scaling_params,
+                "num_flops_per_token": num_flops_per_token,
+                "num_iterations": num_iterations,
+                "target_tokens": target_tokens,
+                "total_tokens": total_tokens,
+                "actual_param_data_ratio": total_tokens / num_scaling_params,
+                "estimated_total_flops": num_flops_per_token * total_tokens,
+                "grad_accum_steps": grad_accum_steps,
+                "train_metric": train_metric if val_bpb is not None else None,
+                "val_metric": val_metric if val_bpb is not None else None,
                 "val_bpb": val_bpb, # loss at last step
                 "model_config": model_config_kwargs,
                 "user_config": user_config, # inputs to the training script
@@ -598,6 +713,31 @@ print0(f"Peak memory usage: {get_max_memory() / 1024 / 1024:.2f}MiB")
 print0(f"Total training time: {total_training_time/60:.2f}m")
 if val_bpb is not None:
     print0(f"Minimum validation bpb: {min_val_bpb:.6f}")
+
+
+# save summary
+if master_process:
+    summary = {
+        "model_tag": output_dirname,
+        "final_step": step,
+        "num_iterations": num_iterations,
+        "total_tokens": total_tokens,
+        "num_scaling_params": num_scaling_params,
+        "actual_param_data_ratio": total_tokens / num_scaling_params,
+        "parameter_counts": param_counts,
+        "final_train_metric": train_metric,
+        "final_val_metric": val_metric,
+        "min_val_bpb": (
+            min_val_bpb if math.isfinite(min_val_bpb) else None
+        ),
+        "total_training_time_seconds": total_training_time,
+        "peak_memory_mib": get_max_memory() / 1024 / 1024,
+        "estimated_total_flops": num_flops_per_token * total_tokens,
+        "checkpoint_dir": checkpoint_dir,
+        "final_checkpoint_step": step,
+    }
+    write_json(summary_path, summary)
+
 
 # cleanup
 wandb_run.finish() # wandb run finish
