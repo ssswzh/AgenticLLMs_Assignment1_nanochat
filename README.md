@@ -35,8 +35,8 @@ Train a BPE tokenizer using nanochat’s Rust tokenizer trainer on a 500 MB samp
 We assume approximately 500M characters as the 500 MB tokenizer-training sample.
 ```bash
 # Train tokenizer with 8192 tokens and 32768 tokens, output to separate directories
-python -m scripts.tok_train_group28 --max-chars 500_000_000 --vocab-size 8192 --outdir $NANOCHAT_BASE_DIR/tokenizer_8192
-python -m scripts.tok_train_group28 --max-chars 500_000_000 --vocab-size 32768 --outdir $NANOCHAT_BASE_DIR/tokenizer_32768
+python -m scripts.tok_train --max-chars 500_000_000 --vocab-size 8192 --outdir $NANOCHAT_BASE_DIR/tokenizer_8192
+python -m scripts.tok_train --max-chars 500_000_000 --vocab-size 32768 --outdir $NANOCHAT_BASE_DIR/tokenizer_32768
 ```
 
 To test how vocabulary size affect compression ratio and sequence length for a fixed text sample, run the following script. This script also include numbers, source code, and non-English text for answering subtask 1.4.
