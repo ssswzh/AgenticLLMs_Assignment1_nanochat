@@ -2,6 +2,7 @@
 Handle output json files
 """
 
+import os
 import json
 
 def write_json(path, data):
