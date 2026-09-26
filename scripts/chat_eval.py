@@ -9,6 +9,7 @@ torchrun --nproc_per_node=8 -m scripts.chat_eval -- -i sft -a ARC-Easy
 """
 
 import argparse
+import os
 from functools import partial
 import torch
 import torch.distributed as dist
@@ -16,6 +17,7 @@ import torch.distributed as dist
 from nanochat.common import compute_init, compute_cleanup, get_dist_info, print0, autodetect_device_type
 from nanochat.checkpoint_manager import load_model
 from nanochat.engine import Engine
+from scripts.json_handle import write_json
 
 from tasks.humaneval import HumanEval
 from tasks.mmlu import MMLU
@@ -179,7 +181,7 @@ if __name__ == "__main__":
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--source', type=str, required=True, help="Source of the model: sft|rl")
+    parser.add_argument('-i', '--source', type=str, required=True, help="Source of the model: base|sft|rl")
     parser.add_argument('-a', '--task-name', type=str, default=None, help="Task name. Default = all tasks. Use | to split multiple tasks.")
     parser.add_argument('-t', '--temperature', type=float, default=0.0)
     parser.add_argument('-m', '--max-new-tokens', type=int, default=512)
@@ -190,6 +192,7 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--step', type=int, default=None, help='Step to load')
     parser.add_argument('-x', '--max-problems', type=int, default=None, help='Max problems to evaluate')
     parser.add_argument('--device-type', type=str, default='', choices=['cuda', 'cpu', 'mps'], help='Device type for evaluation: cuda|cpu|mps. empty => autodetect')
+    parser.add_argument('-o', '--output-json', type=str, default=None, help='Output JSON file for evaluation results')
     args = parser.parse_args()
 
     device_type = autodetect_device_type() if args.device_type == "" else args.device_type
@@ -224,6 +227,19 @@ if __name__ == "__main__":
         )
         results[task_name] = acc
         print0(f"{task_name} accuracy: {100 * acc:.2f}%")
+
+    # Save model identity together with the individual benchmark scores.
+    if args.output_json is not None and ddp_rank == 0:
+        output = {
+            "source": args.source,
+            "model_tag": args.model_tag,
+            "step": meta.get("step", args.step),
+            **results,
+        }
+        output_dir = os.path.dirname(os.path.abspath(args.output_json))
+        os.makedirs(output_dir, exist_ok=True)
+        write_json(args.output_json, output)
+        print0(f"Saved evaluation results to {args.output_json}")
 
     # calculate the ChatCORE metric if we can (similar to CORE, it's the mean centered accuracy)
     # this way, ChatCORE ranges from 0 (at random baseline) to 1 (peak performance)

@@ -24,6 +24,7 @@ import torch.distributed as dist
 from nanochat.flash_attention import HAS_FA3
 from nanochat.engine import Engine
 from scripts.chat_eval import run_chat_eval
+from scripts.json_handle import write_json, append_jsonl
 
 from tasks.common import TaskMixture
 from tasks.gsm8k import GSM8K
@@ -38,9 +39,13 @@ parser.add_argument("--run", type=str, default="dummy", help="wandb run name ('d
 # Runtime
 parser.add_argument("--device-type", type=str, default="", help="cuda|cpu|mps (empty = autodetect)")
 # Model loading
-parser.add_argument("--model-tag", type=str, default=None, help="model tag to load from")
-parser.add_argument("--model-step", type=int, default=None, help="model step to load from")
+parser.add_argument("--stage", type=str, default="midtrain", help="training stage to run", choices=["midtrain", "sft"])
+parser.add_argument("--input-source", type=str, default="base", help="checkpoint source to load from", choices=["base", "sft"])
+parser.add_argument("--input-model-tag", type=str, default=None, help="model tag to load from")
+parser.add_argument("--input-model-step", type=int, default=None, help="model step to load from")
 parser.add_argument("--load-optimizer", type=int, default=1, help="warm-start optimizer from pretrained checkpoint (0=no, 1=yes)")
+parser.add_argument("--output-model-tag", type=str, default=None, help="model tag to save to", required=True)
+parser.add_argument("--inspect-data", action="store_true", help="inspect the training data before starting training")
 # Training horizon
 parser.add_argument("--num-iterations", type=int, default=-1, help="number of optimization steps (-1 = full epoch)")
 # Batch sizes (default: inherit from pretrained checkpoint)
@@ -65,7 +70,12 @@ parser.add_argument("--chatcore-max-sample", type=int, default=24, help="max pro
 parser.add_argument("--mmlu-epochs", type=int, default=3, help="number of epochs of MMLU in training mixture (teaches Multiple Choice)")
 parser.add_argument("--gsm8k-epochs", type=int, default=4, help="number of epochs of GSM8K in training mixture (teaches Math and Tool Use)")
 args = parser.parse_args()
-user_config = vars(args).copy()
+if args.stage == "midtrain" and args.input_source != "base":
+    parser.error("--stage midtrain must load a base checkpoint with --input-source base")
+if args.stage == "sft" and args.input_source != "sft":
+    parser.error("--stage sft must load the mid-training checkpoint with --input-source sft")
+if args.input_source == "sft" and args.input_model_tag == args.output_model_tag:
+    parser.error("--output-model-tag must differ from --input-model-tag")
 # -----------------------------------------------------------------------------
 
 # Compute init
@@ -84,14 +94,25 @@ else:
 
 # wandb logging init
 use_dummy_wandb = args.run == "dummy" or not master_process
-wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat-sft", name=args.run, config=user_config)
 
 # Flash Attention status
 if not HAS_FA3:
     print0("WARNING: Flash Attention 3 not available, using PyTorch SDPA fallback. Training will be less efficient.")
 
+
+# output dir and files
+# output_dirname = args.model_tag if args.model_tag else f"d{depth}" # e.g. d12
+base_dir = get_base_dir()
+checkpoint_dir = os.path.join(base_dir, "chatsft_checkpoints", args.output_model_tag)
+if master_process:
+    os.makedirs(checkpoint_dir, exist_ok=True)
+metrics_path = os.path.join(checkpoint_dir, "metrics.jsonl")
+run_config_path = os.path.join(checkpoint_dir, "run_config.json")
+summary_path = os.path.join(checkpoint_dir, "summary.json")
+
+
 # Load the model and tokenizer
-model, tokenizer, meta = load_model("base", device, phase="train", model_tag=args.model_tag, step=args.model_step)
+model, tokenizer, meta = load_model(args.input_source, device, phase="train", model_tag=args.input_model_tag, step=args.input_model_step)
 
 # Inherit training hyperparameters from pretrained checkpoint (None = inherit, explicit value = override)
 pretrain_user_config = meta.get("user_config", {})
@@ -114,6 +135,10 @@ for name, fallback, source in [
     else:
         print0(f"Using {name}={arg_val}")
 
+# Capture resolved values rather than the pre-inheritance None defaults.
+user_config = vars(args).copy()
+wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat-sft", name=args.run, config=user_config)
+
 orig_model = model
 model = torch.compile(model, dynamic=False)
 depth = model.config.n_layer
@@ -135,9 +160,10 @@ optimizer = model.setup_optimizer(unembedding_lr=args.unembedding_lr, embedding_
 # Note: load_state_dict overwrites param_group metadata (LRs, betas, etc.) with the
 # pretrained values. Since pretraining warmdown brings LRs to ~0, we must save and
 # restore our fresh SFT LRs after loading.
-base_dir = get_base_dir()
+# With --load-optimizer 1, load optim_<step>_rank<N>.pt, continue from its momentum buffers, but reset LRs
+# With --load-optimizer 0, load only model weights, optimizer start from 0
 if args.load_optimizer:
-    optimizer_data = load_optimizer_state("base", device, rank=ddp_rank, model_tag=args.model_tag, step=args.model_step)
+    optimizer_data = load_optimizer_state(args.input_source, device, rank=ddp_rank, model_tag=args.input_model_tag, step=args.input_model_step)
     if optimizer_data is not None:
         base_lrs = [group["lr"] for group in optimizer.param_groups]
         optimizer.load_state_dict(optimizer_data)
@@ -158,19 +184,62 @@ for group in optimizer.param_groups:
     group["lr"] = group["lr"] * args.init_lr_frac
     group["initial_lr"] = group["lr"]
 
-# SFT data mixture and DataLoader
-train_tasks = [
-    SmolTalk(split="train"), # 460K rows of general conversations
-    *[MMLU(subset="all", split="auxiliary_train") for _ in range(args.mmlu_epochs)], # 100K rows per epoch
-    *[GSM8K(subset="main", split="train") for _ in range(args.gsm8k_epochs)], # 8K rows per epoch
-]
-train_dataset = TaskMixture(train_tasks)
-print0(f"Training mixture: {len(train_dataset):,} rows (MMLU x{args.mmlu_epochs}, GSM8K x{args.gsm8k_epochs})")
-val_dataset = TaskMixture([
-    SmolTalk(split="test"), # 24K rows in test set
-    MMLU(subset="all", split="test", stop=5200), # 14K rows in test set, use only 5.2K to match the train ratios
-    GSM8K(subset="main", split="test", stop=420), # 1.32K rows in test set, use only 420 to match the train ratios
-]) # total: 24K + 5.2K + 0.42K ~= 29.6K rows
+# TWO STAGE
+# Stage 1: use MMLU and GSM8K to train the model
+if args.stage == "midtrain":
+    train_tasks = [
+        # SmolTalk(split="train"), # 460K rows of general conversations
+        *[MMLU(subset="all", split="auxiliary_train") for _ in range(args.mmlu_epochs)], # 100K rows per epoch
+        *[GSM8K(subset="main", split="train") for _ in range(args.gsm8k_epochs)], # 8K rows per epoch
+    ]
+    train_dataset = TaskMixture(train_tasks)
+    print0(f"Training mixture: {len(train_dataset):,} rows (MMLU x{args.mmlu_epochs}, GSM8K x{args.gsm8k_epochs})")
+    val_dataset = TaskMixture([
+        # SmolTalk(split="test"), # 24K rows in test set
+        MMLU(subset="all", split="test", stop=5200), # 14K rows in test set, use only 5.2K to match the train ratios
+        GSM8K(subset="main", split="test", stop=420), # 1.32K rows in test set, use only 420 to match the train ratios
+    ]) # total: 24K + 5.2K + 0.42K ~= 29.6K rows
+# Stage 2
+else:
+    train_dataset = TaskMixture([SmolTalk(split="train")])
+    val_dataset = TaskMixture([SmolTalk(split="test")])
+    print0(f"Training mixture: {len(train_dataset):,} rows (SmolTalk)")
+
+# Inspect MMLU and SmolTalk explicitly, independent of the active training stage.
+if args.inspect_data and master_process:
+    mmlu_inspect = train_tasks[0] if args.stage == "midtrain" else MMLU(subset="all", split="auxiliary_train")
+    smoltalk_inspect = train_dataset.tasks[0] if args.stage == "sft" else SmolTalk(split="train")
+
+    for dataset_name, dataset in [
+        ("MMLU auxiliary_train", mmlu_inspect),
+        ("SmolTalk train", smoltalk_inspect),
+    ]:
+        print(f"\n{dataset_name} dataset size: {len(dataset):,}")
+        for i in range(min(3, len(dataset))):
+            conversation = dataset[i]
+            print(f"{dataset_name} row {i}:")
+            for turn in conversation["messages"]:
+                print(f"  {turn['role']}: {turn['content']}")
+
+if args.inspect_data and ddp:
+    dist.barrier()
+
+if master_process:
+    write_json(run_config_path, {
+        "stage": args.stage,
+        "input_source": args.input_source,
+        "input_model_tag": args.input_model_tag,
+        "input_model_step": args.input_model_step,
+        "output_model_tag": args.output_model_tag,
+        "user_config": user_config,
+        "train_dataset_size": len(train_dataset),
+        "val_dataset_size": len(val_dataset),
+        "world_size": ddp_world_size,
+        "grad_accum_steps": grad_accum_steps,
+        "checkpoint_dir": checkpoint_dir,
+    })
+
+
 # DataLoader is defined here, it emits inputs, targets : 2D tensors of shape (device_batch_size, max_seq_len)
 # A big problem is that we don't know the final num_iterations in advance. So we create
 # these two global variables and update them from within the data generator.
@@ -205,6 +274,8 @@ def sft_data_generator_bos_bestfit(split, buffer_size=100):
         nonlocal cursor, epoch
         while len(conv_buffer) < buffer_size:
             conversation = dataset[cursor]
+            # ids: token ID of full dialog
+            # mask: 0 for padding (user/system/special tokens), 1 for actual content (assistant)
             ids, mask = tokenizer.render_conversation(conversation)
             conv_buffer.append((ids, mask))
             cursor += ddp_world_size
@@ -228,7 +299,7 @@ def sft_data_generator_bos_bestfit(split, buffer_size=100):
 
                 remaining = row_capacity - len(row)
 
-                # Find largest conversation that fits entirely
+                # Find largest conversation that fits entirely, best-fit packing
                 best_idx = -1
                 best_len = 0
                 for i, (conv, _) in enumerate(conv_buffer):
@@ -287,7 +358,7 @@ def sft_data_generator_bos_bestfit(split, buffer_size=100):
         # with targets (shifted by 1). Unmasked positions get -1 (ignore_index).
         mask_tensor = torch.tensor(mask_rows, dtype=torch.int8)
         mask_targets = mask_tensor[:, 1:].to(device=device)
-        targets[mask_targets == 0] = -1
+        targets[mask_targets == 0] = -1 # set to -1 to ignore loss
 
         # Mask out padding positions in targets (set to -1 = ignore_index)
         # For each row, positions >= (content_length - 1) in targets should be masked
@@ -323,6 +394,8 @@ def get_muon_momentum(it):
 # Training loop
 x, y = next(train_loader) # prefetch the very first batch of data
 min_val_bpb = float("inf")
+val_bpb = None
+val_metric = None
 smooth_train_loss = 0 # EMA of training loss
 ema_beta = 0.9 # EMA decay factor
 total_training_time = 0 # total wall-clock time of training
@@ -342,6 +415,7 @@ while True:
         val_loader = build_val_loader()
         eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len * ddp_world_size)
         val_metric = evaluate_metric(model, val_loader, eval_steps, token_bytes)
+        val_bpb = val_metric["bpb"]
         print0(f"Step {step:05d} | Validation bpb: {val_metric['bpb']:.4f}")
         if val_metric['bpb'] < min_val_bpb:
             min_val_bpb = val_metric['bpb']
@@ -354,6 +428,18 @@ while True:
             "val/total_tokens": val_metric['total_tokens'],
             "val/total_bytes": val_metric['total_bytes'],
         })
+        # save the metrics to a jsonl file for later analysis
+        if master_process:
+            append_jsonl(metrics_path, {
+                "step": step,
+                "total_training_flops": flops_so_far,
+                "total_training_time": total_training_time,
+                "val_loss": val_metric["loss"],
+                "val_bpb": val_metric["bpb"],
+                "val_total_tokens": val_metric["total_tokens"],
+                "val_total_bytes": val_metric["total_bytes"],
+                "min_val_bpb": min_val_bpb
+            })
         model.train()
 
     # once in a while: estimate the ChatCORE metric (all ranks participate)
@@ -393,8 +479,6 @@ while True:
 
     # save checkpoint at the end of the run (all ranks participate so each saves its optimizer shard)
     if last_step:
-        output_dirname = args.model_tag if args.model_tag else f"d{depth}" # e.g. d12
-        checkpoint_dir = os.path.join(base_dir, "chatsft_checkpoints", output_dirname)
         save_checkpoint(
             checkpoint_dir,
             step,
@@ -402,7 +486,18 @@ while True:
             optimizer.state_dict(),
             {
                 "step": step,
-                "val_bpb": val_bpb, # loss at last step
+                "stage": args.stage,
+                "input_source": args.input_source,
+                "input_model_tag": args.input_model_tag,
+                "input_model_step": args.input_model_step,
+                "output_model_tag": args.output_model_tag,
+                "val_bpb": val_bpb,
+                "val_metric": val_metric,
+                "device_batch_size": args.device_batch_size,
+                "total_batch_size": args.total_batch_size,
+                "max_seq_len": args.max_seq_len,
+                "train_dataset_size": len(train_dataset),
+                "val_dataset_size": len(val_dataset),
                 "model_config": {
                     "sequence_len": args.max_seq_len,
                     "vocab_size": tokenizer.get_vocab_size(),
@@ -496,6 +591,23 @@ while True:
 print0(f"Peak memory usage: {get_max_memory() / 1024 / 1024:.2f}MiB")
 print0(f"Total training time: {total_training_time/60:.2f}m")
 print0(f"Minimum validation bpb: {min_val_bpb:.4f}")
+
+if master_process:
+    write_json(summary_path, {
+        "stage": args.stage,
+        "input_source": args.input_source,
+        "input_model_tag": args.input_model_tag,
+        "input_model_step": args.input_model_step,
+        "output_model_tag": args.output_model_tag,
+        "final_step": step,
+        "final_val_metric": val_metric,
+        "min_val_bpb": min_val_bpb if min_val_bpb != float("inf") else None,
+        "total_training_time_seconds": total_training_time,
+        "peak_memory_mib": get_max_memory() / 1024 / 1024,
+        "train_dataset_size": len(train_dataset),
+        "val_dataset_size": len(val_dataset),
+        "checkpoint_dir": checkpoint_dir,
+    })
 
 # cleanup
 wandb_run.finish() # wandb run finish

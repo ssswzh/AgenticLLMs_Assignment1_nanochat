@@ -62,3 +62,21 @@ Draw BPB plot for the pre-trained model. The BPB plot is stored in `$NANOCHAT_BA
 ```bash
 python -m group28.task2_bpb_eval "$NANOCHAT_BASE_DIR/base_checkpoints/depth2_eval50/metrics.jsonl" 0.01
 ```
+
+
+## Task 3: Mid-Training and Supervised Fine-Tuning
+
+Add `--stage` to isolate mid-training and supervised fine-tuning. Use `--input-source` to specify the input data source. Use `--input-model-tag` to specify the input model tag. Use `--output-model-tag` to specify the output model tag.
+```bash
+# 3.1 Mid-Training
+python -m scripts.chat_sft --stage midtrain --input-source base --input-model-tag depth2_eval50 --output-model-tag depth2_midtrain --inspect-data --chatcore-every 999999
+# 3.2 Supervised Fine-Tuning
+python -m scripts.chat_sft --stage sft --input-source sft --input-model-tag depth2_midtrain --output-model-tag depth2_sft --chatcore-every 999999
+```
+
+Evaluate 3 models separately.
+```bash
+python -m scripts.chat_eval -i base -g depth2_eval50 -a 'ARC-Easy|ARC-Challenge|GSM8K' -o group28/task3_eval_base.json
+python -m scripts.chat_eval -i sft -g depth2_midtrain -a 'ARC-Easy|ARC-Challenge|GSM8K' -o group28/task3_eval_midtrain.json
+python -m scripts.chat_eval -i sft -g depth2_sft -a 'ARC-Easy|ARC-Challenge|GSM8K' -o group28/task3_eval_sft.json
+```
