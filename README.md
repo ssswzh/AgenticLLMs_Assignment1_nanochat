@@ -12,7 +12,7 @@ source .venv/bin/activate
 export NANOCHAT_BASE_DIR=/data/s4683226/AgenticLLMs/nanochat
 ```
 
-Download ClimbMix dataset.The dataset will be stored in `$NANOCHAT_BASE_DIR/dataset/`.
+Download ClimbMix dataset.The dataset will be stored in `$NANOCHAT_BASE_DIR/base_data_climbmix/`.
 ```bash
 python -m nanochat.dataset -n 10
 ```
@@ -52,8 +52,12 @@ We used 10 shards download in *Task 1* (approx. 2B characters), rerun a tokenize
 python -m scripts.tok_train
 ```
 
-Use slightly modified script `scripts.base_train_group28` to log the training process. Set `--depth=2` for pre-training. The pre-trained model is stored in `$NANOCHAT_BASE_DIR/models/`. Set `--device-batch-size 16` to avoid OOM. Set `--sample-every=999999` to run test sample only at the end of training.
+Use slightly modified script `scripts.base_train` to log the training process. Set `--depth=2` for pre-training. The pre-trained model is stored in `$NANOCHAT_BASE_DIR/models/`. Set `--device-batch-size 16` to avoid OOM. Set `--sample-every=999999` to run test sample only at the end of training. Set `--eval-tokens 2097152` to evaluate on 2M tokens for computational efficiency.
 ```bash
-python -m scripts.base_train --depth 2 --save-every 500 --target-param-data-ratio 12 --model-tag depth2 --device-batch-size 16 --sample-every=999999 --core-metric-every=999999
+python -m scripts.base_train --depth 2 --eval-every 50 --save-every 100 --target-param-data-ratio 12 --model-tag depth2_eval50 --device-batch-size 16 --sample-every=999999 --eval-tokens 2097152 
 ```
 
+Draw BPB plot for the pre-trained model. The BPB plot is stored in `$NANOCHAT_BASE_DIR/base_checkpoints/depth2/metrics.png`.
+```bash
+python group28/task2_bpb_eval.py "$NANOCHAT_BASE_DIR/base_checkpoints/depth2/metrics.jsonl" 0.01
+```
