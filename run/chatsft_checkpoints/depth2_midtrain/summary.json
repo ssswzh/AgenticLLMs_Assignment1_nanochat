@@ -1,0 +1,20 @@
+{
+  "stage": "midtrain",
+  "input_source": "base",
+  "input_model_tag": "depth2_eval50",
+  "input_model_step": null,
+  "output_model_tag": "depth2_midtrain",
+  "final_step": 928,
+  "final_val_metric": {
+    "loss": 1.4176192568295871,
+    "bpb": 0.9190902633101328,
+    "total_tokens": 1465828,
+    "total_bytes": 3251477
+  },
+  "min_val_bpb": 0.9190902633101328,
+  "total_training_time_seconds": 1565.3944118022919,
+  "peak_memory_mib": 9045.58837890625,
+  "train_dataset_size": 329418,
+  "val_dataset_size": 5620,
+  "checkpoint_dir": "/content/drive/MyDrive/AgenticLLMs_Assignment1_nanochat/run/chatsft_checkpoints/depth2_midtrain"
+}
