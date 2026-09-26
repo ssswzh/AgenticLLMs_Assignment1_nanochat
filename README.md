@@ -5,11 +5,11 @@ Repository forked from [karpathy/nanochat](https://github.com/karpathy/nanochat)
 
 ## Setup
 
-Clone the nanochat repository, install uv. The base directory of nanochat is `~/.cache/nanochat/`, set env `$NANOCHAT_BASE_DIR`. 
+Clone the nanochat repository, install uv. Change the base directory of nanochat to `/data/s4683226/AgenticLLMs/nanochat`, set env `$NANOCHAT_BASE_DIR`. 
 ```bash
-uv sync --extra gpu
+uv sync --extra cpu
 source .venv/bin/activate
-export NANOCHAT_BASE_DIR=~/.cache/nanochat/
+export NANOCHAT_BASE_DIR=/data/s4683226/AgenticLLMs/nanochat
 ```
 
 Download ClimbMix dataset.The dataset will be stored in `$NANOCHAT_BASE_DIR/dataset/`.
@@ -52,11 +52,8 @@ We used 10 shards download in *Task 1* (approx. 2B characters), rerun a tokenize
 python -m scripts.tok_train
 ```
 
-Use slightly modified script `scripts.base_train_group28` to log the training process. Set `--depth=2` for pre-training. The pre-trained model is stored in `$NANOCHAT_BASE_DIR/models/`. Set `--device-batch-size 16` to avoid OOM.
+Use slightly modified script `scripts.base_train_group28` to log the training process. Set `--depth=2` for pre-training. The pre-trained model is stored in `$NANOCHAT_BASE_DIR/models/`. Set `--device-batch-size 16` to avoid OOM. Set `--sample-every=999999` to run test sample only at the end of training.
 ```bash
-# Default data ratio
-python -m scripts.base_train --depth 2 --save-every 500 --target-param-data-ratio 12 --model-tag depth2_dataratio12 --device-batch-size 16
-# Chinchilla data ratio
-python -m scripts.base_train --depth 2 --save-every 500 --target-param-data-ratio 20 --model-tag depth2_dataratio20 --device-batch-size 16
+python -m scripts.base_train --depth 2 --save-every 500 --target-param-data-ratio 12 --model-tag depth2 --device-batch-size 16 --sample-every=999999 --core-metric-every=999999
 ```
 
