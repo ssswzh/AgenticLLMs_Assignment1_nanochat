@@ -58,7 +58,7 @@ python -m scripts.base_train --depth 2 --eval-every 50 --save-every 100 --target
 # python -m scripts.base_train --depth 4 --eval-every 50 --save-every 100 --target-param-data-ratio 12 --model-tag depth4_eval50 --device-batch-size 16 --sample-every=999999 --eval-tokens 2097152
 ```
 
-Draw BPB plot for the pre-trained model. The BPB plot is stored in `$NANOCHAT_BASE_DIR/base_checkpoints/depth2/metrics.png`.
+Draw BPB plot for the pre-trained model. The BPB plot is stored in `$NANOCHAT_BASE_DIR/base_checkpoints/depth2_eval50/metrics.png`.
 ```bash
 python -m group28.task2_bpb_eval "$NANOCHAT_BASE_DIR/base_checkpoints/depth2_eval50/metrics.jsonl" 0.01
 ```
