@@ -1,0 +1,86 @@
+{
+  "step": 400,
+  "parameter_counts": {
+    "wte": 8388608,
+    "value_embeds": 16777216,
+    "lm_head": 8388608,
+    "transformer_matrices": 3145776,
+    "scalars": 34,
+    "total": 36700242
+  },
+  "num_scaling_params": 11534384,
+  "num_flops_per_token": 80216496,
+  "num_iterations": 528,
+  "target_tokens": 138412608,
+  "total_tokens": 138412032,
+  "actual_param_data_ratio": 11.999950062352701,
+  "estimated_total_flops": 11102928211279872,
+  "grad_accum_steps": 8,
+  "train_metric": {
+    "loss": 3.8791236877441406,
+    "bpb": 1.180680410768516,
+    "total_tokens": 2097152,
+    "total_bytes": 9933089
+  },
+  "val_metric": {
+    "loss": 3.8545494079589844,
+    "bpb": 1.1712144512862788,
+    "total_tokens": 2097152,
+    "total_bytes": 9950089
+  },
+  "val_bpb": 1.1712144512862788,
+  "model_config": {
+    "sequence_len": 2048,
+    "vocab_size": 32768,
+    "n_layer": 4,
+    "n_head": 2,
+    "n_kv_head": 2,
+    "n_embd": 256,
+    "window_pattern": "SSSL"
+  },
+  "user_config": {
+    "run": "dummy",
+    "device_type": "",
+    "fp8": false,
+    "fp8_recipe": "tensorwise",
+    "depth": 4,
+    "aspect_ratio": 64,
+    "head_dim": 128,
+    "max_seq_len": 2048,
+    "window_pattern": "SSSL",
+    "num_iterations": -1,
+    "target_flops": -1.0,
+    "target_param_data_ratio": 12.0,
+    "device_batch_size": 16,
+    "total_batch_size": -1,
+    "embedding_lr": 0.3,
+    "unembedding_lr": 0.008,
+    "weight_decay": 0.28,
+    "matrix_lr": 0.02,
+    "scalar_lr": 0.5,
+    "warmup_steps": 40,
+    "warmdown_ratio": 0.65,
+    "final_lr_frac": 0.05,
+    "resume_from_step": -1,
+    "eval_every": 50,
+    "eval_tokens": 2097152,
+    "core_metric_every": 2000,
+    "core_metric_max_per_task": 500,
+    "sample_every": 999999,
+    "save_every": 100,
+    "model_tag": "depth4_eval50"
+  },
+  "device_batch_size": 16,
+  "max_seq_len": 2048,
+  "total_batch_size": 262144,
+  "dataloader_state_dict": {
+    "pq_idx": 2,
+    "rg_idx": 29,
+    "epoch": 1
+  },
+  "loop_state": {
+    "min_val_bpb": 1.1712144512862788,
+    "smooth_train_loss": 3.8815804821540127,
+    "total_training_time": 481.0462484359741
+  }
+}

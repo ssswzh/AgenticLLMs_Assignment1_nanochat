@@ -1,0 +1,34 @@
+{
+  "model_tag": "depth4_eval50",
+  "final_step": 528,
+  "num_iterations": 528,
+  "total_tokens": 138412032,
+  "num_scaling_params": 11534384,
+  "actual_param_data_ratio": 11.999950062352701,
+  "parameter_counts": {
+    "wte": 8388608,
+    "value_embeds": 16777216,
+    "lm_head": 8388608,
+    "transformer_matrices": 3145776,
+    "scalars": 34,
+    "total": 36700242
+  },
+  "final_train_metric": {
+    "loss": 3.755887269973755,
+    "bpb": 1.1432086564011978,
+    "total_tokens": 2097152,
+    "total_bytes": 9933089
+  },
+  "final_val_metric": {
+    "loss": 3.7303502559661865,
+    "bpb": 1.133519704440281,
+    "total_tokens": 2097152,
+    "total_bytes": 9950089
+  },
+  "min_val_bpb": 1.133519704440281,
+  "total_training_time_seconds": 640.8707180023193,
+  "peak_memory_mib": 5040.3984375,
+  "estimated_total_flops": 11102928211279872,
+  "checkpoint_dir": "E:\\LLM\\A1\\AgenticLLMs_Assignment1_nanochat\\base_checkpoints\\depth4_eval50",
+  "final_checkpoint_step": 528
+}
