@@ -61,7 +61,7 @@ def main():
         f"below {threshold_percent:g}%): {val_flatten_point or 'not detected'}"
     )
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(6, 4))
     plt.plot(df["step"], df["train_bpb"], marker="o", color="tab:blue", label="Training BPB")
     plt.plot(df["step"], df["val_bpb"], marker="s", color="tab:orange", label="Validation BPB")
 
