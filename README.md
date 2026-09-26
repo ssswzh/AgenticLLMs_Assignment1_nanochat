@@ -7,7 +7,7 @@ Repository forked from [karpathy/nanochat](https://github.com/karpathy/nanochat)
 
 Clone the nanochat repository, install uv. Change the base directory of nanochat to `/data/s4683226/AgenticLLMs/nanochat`, set env `$NANOCHAT_BASE_DIR`. 
 ```bash
-uv sync --extra cpu
+uv sync --extra gpu
 source .venv/bin/activate
 export NANOCHAT_BASE_DIR=/data/s4683226/AgenticLLMs/nanochat
 ```
