@@ -1,0 +1,8 @@
+{
+  "source": "sft",
+  "model_tag": "depth2_sft",
+  "step": 2868,
+  "ARC-Easy": 0.25126262626262624,
+  "ARC-Challenge": 0.23293515358361774,
+  "GSM8K": 0.0
+}

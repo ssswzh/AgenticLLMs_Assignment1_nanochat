@@ -1,0 +1,8 @@
+{
+  "source": "base",
+  "model_tag": "depth2_eval50",
+  "step": 420,
+  "ARC-Easy": 0.24873737373737373,
+  "ARC-Challenge": 0.2363481228668942,
+  "GSM8K": 0.0
+}
