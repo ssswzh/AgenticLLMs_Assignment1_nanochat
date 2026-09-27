@@ -66,12 +66,12 @@ python -m group28.task2_bpb_eval "$NANOCHAT_BASE_DIR/base_checkpoints/depth2_eva
 
 ## Task 3: Mid-Training and Supervised Fine-Tuning
 
-Add `--stage` to isolate mid-training and supervised fine-tuning. Use `--input-source` to specify the input data source. Use `--input-model-tag` to specify the input model tag. Use `--output-model-tag` to specify the output model tag.
+Add `--stage` to isolate mid-training and supervised fine-tuning. Use `--input-source` to specify the input data source. Use `--input-model-tag` to specify the input model tag. Use `--output-model-tag` to specify the output model tag. Set `--chatcore-every -1` to disable chatcore evaluation (cuda out of memory).
 ```bash
 # 3.1 Mid-Training
 python -m scripts.chat_sft --stage midtrain --input-source base --input-model-tag depth2_eval50 --output-model-tag depth2_midtrain --inspect-data --chatcore-every 999999
 # 3.2 Supervised Fine-Tuning
-python -m scripts.chat_sft --stage sft --input-source sft --input-model-tag depth2_midtrain --output-model-tag depth2_sft --chatcore-every 999999
+python -m scripts.chat_sft --stage sft --input-source sft --input-model-tag depth2_midtrain --output-model-tag depth2_sft --chatcore-every -1
 ```
 
 Evaluate 3 models separately.
@@ -79,4 +79,6 @@ Evaluate 3 models separately.
 python -m scripts.chat_eval -i base -g depth2_eval50 -a 'ARC-Easy|ARC-Challenge|GSM8K' -o group28/task3_eval_base.json
 python -m scripts.chat_eval -i sft -g depth2_midtrain -a 'ARC-Easy|ARC-Challenge|GSM8K' -o group28/task3_eval_midtrain.json
 python -m scripts.chat_eval -i sft -g depth2_sft -a 'ARC-Easy|ARC-Challenge|GSM8K' -o group28/task3_eval_sft.json
+# summarize performance
+python -m group28.task3_json2table --input group28/task3_*json --output group28/task3_eval_table.tsv
 ```
