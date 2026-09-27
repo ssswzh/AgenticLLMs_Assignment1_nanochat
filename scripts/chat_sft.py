@@ -208,10 +208,12 @@ else:
 # Inspect MMLU and SmolTalk explicitly, independent of the active training stage.
 if args.inspect_data and master_process:
     mmlu_inspect = train_tasks[0] if args.stage == "midtrain" else MMLU(subset="all", split="auxiliary_train")
+    gsm_inspect = train_tasks[1] if args.stage == "midtrain" else GSM8K(subset="main", split="train")
     smoltalk_inspect = train_dataset.tasks[0] if args.stage == "sft" else SmolTalk(split="train")
 
     for dataset_name, dataset in [
         ("MMLU auxiliary_train", mmlu_inspect),
+        ("GSM8K train", gsm_inspect),
         ("SmolTalk train", smoltalk_inspect),
     ]:
         print(f"\n{dataset_name} dataset size: {len(dataset):,}")

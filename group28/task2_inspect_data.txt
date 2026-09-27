@@ -27,6 +27,17 @@ MMLU auxiliary_train row 2:
 Respond only with the letter of the correct answer.
   assistant: C
 
+GSM8K train dataset size: 7,473
+GSM8K train row 0:
+  user: Mimi picked up 2 dozen seashells on the beach.  Kyle found twice as many shells as Mimi and put them in his pocket. Leigh grabbed one-third of the shells that Kyle found.  How many seashells did Leigh have?
+  assistant: [{'type': 'text', 'text': 'Mimi has 2 x 12 = '}, {'type': 'python', 'text': '2*12'}, {'type': 'python_output', 'text': '24'}, {'type': 'text', 'text': '24 sea shells.\nKyle has 24 x 2 = '}, {'type': 'python', 'text': '24*2'}, {'type': 'python_output', 'text': '48'}, {'type': 'text', 'text': '48 sea shells.\nLeigh has 48 / 3 = '}, {'type': 'python', 'text': '48/3'}, {'type': 'python_output', 'text': '16'}, {'type': 'text', 'text': '16 sea shells.\n#### 16'}]
+GSM8K train row 1:
+  user: Frankie's parents let him have many pets. He has six more snakes than he has cats. He has one less parrot than cats. Six of his pets have four legs. He has 2 dogs. How many pets does he have in total?
+  assistant: [{'type': 'text', 'text': 'He has 6 - 2 = '}, {'type': 'python', 'text': '6-2'}, {'type': 'python_output', 'text': '4'}, {'type': 'text', 'text': '4 cats.\nHe has 4 - 1 = '}, {'type': 'python', 'text': '4-1'}, {'type': 'python_output', 'text': '3'}, {'type': 'text', 'text': '3 parrots.\nHe has 4 + 6 = '}, {'type': 'python', 'text': '4+6'}, {'type': 'python_output', 'text': '10'}, {'type': 'text', 'text': '10 snakes.\nHe has a total of 2 + 4 + 3 + 10 = '}, {'type': 'python', 'text': '2+4+3+10'}, {'type': 'python_output', 'text': '19'}, {'type': 'text', 'text': '19 pets.\n#### 19'}]
+GSM8K train row 2:
+  user: Olaf collects colorful toy cars. At first, his collection consisted of 150 cars. His family, knowing his hobby, decided to give him some toy cars. Grandpa gave Olaf twice as many toy cars as the uncle. Dad gave Olaf 10 toy cars, 5 less than Mum. Auntie gave Olaf 6 toy cars, 1 more than the uncle. How many toy cars does Olaf have in total, after receiving all these gifts?
+  assistant: [{'type': 'text', 'text': 'Dad gave Olaf 10 toy cars,\nMom has given Olaf 5 more toy cars than Dad, so 10 + 5 = '}, {'type': 'python', 'text': '10+5'}, {'type': 'python_output', 'text': '15'}, {'type': 'text', 'text': '15 toy cars\nAuntie gave Olaf 6 toy cars,\nUncle has given 1 less toy than Auntie, so 6 - 1 = '}, {'type': 'python', 'text': '6-1'}, {'type': 'python_output', 'text': '5'}, {'type': 'text', 'text': '5 toy cars\nGrandpa gave Olaf 2 * 5 = '}, {'type': 'python', 'text': '2*5'}, {'type': 'python_output', 'text': '10'}, {'type': 'text', 'text': '10 toy cars.\nAll the family together gave Olaf 10 +15 + 6 + 5 + 10 = '}, {'type': 'python', 'text': '10+15+6+5+10'}, {'type': 'python_output', 'text': '46'}, {'type': 'text', 'text': "46.\nAdding the cars Olaf already had, Olaf's collection has 150 + 46 = "}, {'type': 'python', 'text': '150+46'}, {'type': 'python_output', 'text': '196'}, {'type': 'text', 'text': '196 cars.\n#### 196'}]
+
 SmolTalk train dataset size: 460,341
 SmolTalk train row 0:
   user: A researcher interested in examining students' study time per day collected data from a random sample of 20 students. Here are the data: 
