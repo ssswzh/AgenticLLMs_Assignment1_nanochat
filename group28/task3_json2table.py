@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 
-METRICS = ["ARC-Easy", "ARC-Challenge", "GSM8K"]
+METRICS = {"ARC-Easy": 2376, "ARC-Challenge": 1172, "GSM8K": 1319}
 STAGE_ORDER = {"Base": 0, "Mid-training": 1, "SFT": 2}
 
 
@@ -51,7 +51,7 @@ def main():
                 "Stage": infer_stage(path, result["model_tag"]),
                 "Model tag": result["model_tag"],
                 "Step": result["step"],
-                **{f"{metric} (%)": 100 * result[metric] for metric in METRICS},
+                **{f"{metric} (N={total})": f"{round(total*result[metric])} ({round(100 * result[metric],2)}%)" for metric, total in METRICS.items()},
             }
         )
 

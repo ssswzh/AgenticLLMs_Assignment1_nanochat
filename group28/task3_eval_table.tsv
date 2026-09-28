@@ -1,4 +1,4 @@
-Stage	Model tag	Step	ARC-Easy (%)	ARC-Challenge (%)	GSM8K (%)
-Base	depth2_eval50	420	24.87	23.63	0.00
-Mid-training	depth2_midtrain	928	25.76	28.16	0.99
-SFT	depth2_sft	2868	25.13	23.29	0.00
+Stage	Model tag	Step	ARC-Easy (N=2376)	ARC-Challenge (N=1172)	GSM8K (N=1319)
+Base	depth2_eval50	420	591 (24.87%)	277 (23.63%)	0 (0.0%)
+Mid-training	depth2_midtrain	928	612 (25.76%)	330 (28.16%)	13 (0.99%)
+SFT	depth2_sft	2868	597 (25.13%)	273 (23.29%)	0 (0.0%)
