@@ -82,3 +82,22 @@ python -m scripts.chat_eval -i sft -g depth2_sft -a 'ARC-Easy|ARC-Challenge|GSM8
 # summarize performance
 python -m group28.task3_json2table --input group28/task3_*json --output group28/task3_eval_table.tsv
 ```
+
+
+## Task 4: Inference, Deployment, and Critical Reflection
+
+### Part A: Inference and Deployment
+
+Restore the Web server and UI from the previous Git version, and add dependencies for Web server and UI.
+```bash
+git restore --source=da32e1d^ -- scripts/chat_web.py nanochat/ui.html nanochat/logo.svg
+uv add fastapi uvicorn
+```
+
+Initialize and start web UI
+```bash
+python -m scripts.chat_web -i sft -g depth2_midtrain -p 8001
+python -m scripts.chat_web -i sft -g depth2_sft -p 8002
+```
+
+Then, open `http://localhost:8001` and `http://localhost:8002` in two different browser tabs. 
