@@ -7,7 +7,6 @@ The table contains the 45 generations used for the Task 4 temperature experiment
 | Setting | Value |
 |---|---|
 | Models | Base (`depth2_eval50`), Midtrain (`depth2_midtrain`), SFT (`depth2_sft`) |
-| Parameters per model | 12,976,170 |
 | Temperatures | 0.1, 0.7, 1.5 |
 | Top-k | 50 |
 | Max generated tokens | 128 |
@@ -27,7 +26,7 @@ The table contains the 45 generations used for the Task 4 temperature experiment
 
 ## Base model
 
-Checkpoint: `depth2_eval50` · source: `base` · step: **420** · parameters: **12,976,170**
+Checkpoint: `depth2_eval50` · source: `base` · step: **420** 
 
 | Temperature | Prompt type | Prompt | Response |
 |---:|---|---|---|
@@ -49,7 +48,7 @@ Checkpoint: `depth2_eval50` · source: `base` · step: **420** · parameters: **
 
 ## Midtrain model
 
-Checkpoint: `depth2_midtrain` · source: `sft` · step: **928** · parameters: **12,976,170**
+Checkpoint: `depth2_midtrain` · source: `sft` · step: **928** 
 
 | Temperature | Prompt type | Prompt | Response |
 |---:|---|---|---|
@@ -71,7 +70,7 @@ Checkpoint: `depth2_midtrain` · source: `sft` · step: **928** · parameters: *
 
 ## SFT model
 
-Checkpoint: `depth2_sft` · source: `sft` · step: **2868** · parameters: **12,976,170**
+Checkpoint: `depth2_sft` · source: `sft` · step: **2868** 
 
 | Temperature | Prompt type | Prompt | Response |
 |---:|---|---|---|
