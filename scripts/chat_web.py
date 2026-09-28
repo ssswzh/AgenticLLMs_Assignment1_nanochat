@@ -47,6 +47,9 @@ from dataclasses import dataclass
 from nanochat.common import compute_init, autodetect_device_type
 from nanochat.checkpoint_manager import load_model
 from nanochat.engine import Engine
+from datetime import datetime
+from pathlib import Path
+
 
 # Abuse prevention limits
 MAX_MESSAGES_PER_REQUEST = 500
@@ -79,6 +82,28 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+RESULTS_DIR = Path("group28_results")
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+RESULTS_FILE = RESULTS_DIR / "task4_temperature_experiment.json"
+
+def save_experiment_result(record):
+    """Append one generation result to the Task 4 experiment JSON."""
+
+    if RESULTS_FILE.exists():
+        with open(RESULTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        data = {
+            "experiment": "task4_temperature_experiment",
+            "results": []
+        }
+
+    data["results"].append(record)
+
+    with open(RESULTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 device_type = autodetect_device_type() if args.device_type == "" else args.device_type
 ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
@@ -260,10 +285,18 @@ async def generate_stream(
     top_k=None
 ) -> AsyncGenerator[str, None]:
     """Generate assistant response with streaming."""
-    temperature = temperature if temperature is not None else args.temperature
-    max_new_tokens = max_new_tokens if max_new_tokens is not None else args.max_tokens
-    top_k = top_k if top_k is not None else args.top_k
+    temperature = args.temperature
+    max_new_tokens = args.max_tokens
+    top_k = args.top_k
 
+    print(
+    f"[GENERATION SETTINGS] "
+    f"temperature={temperature}, "
+    f"top_k={top_k}, "
+    f"max_tokens={max_new_tokens}, "
+    f"seed=42"
+    )
+    
     assistant_end = worker.tokenizer.encode_special("<|assistant_end|>")
     bos = worker.tokenizer.get_bos_token_id()
 
@@ -278,7 +311,7 @@ async def generate_stream(
         max_tokens=max_new_tokens,
         temperature=temperature,
         top_k=top_k,
-        seed=random.randint(0, 2**31 - 1)
+        seed=42
     ):
         token = token_column[0]
 
@@ -361,6 +394,80 @@ async def chat_completions(request: ChatRequest):
                 full_response = "".join(response_tokens)
                 logger.info(f"[ASSISTANT] (GPU {worker.gpu_id}): {full_response}")
                 logger.info("="*20)
+
+                # Get the actual generation parameters
+                actual_temperature = (
+                    args.temperature
+                )
+
+                actual_top_k = (
+                    request.top_k
+                    if request.top_k is not None
+                    else args.top_k
+                )
+
+                actual_max_tokens = (
+                    request.max_tokens
+                    if request.max_tokens is not None
+                    else args.max_tokens
+                )
+
+                # Get the current user prompt
+                user_messages = [
+                    message.content
+                    for message in request.messages
+                    if message.role == "user"
+                ]
+
+                current_prompt = user_messages[-1] if user_messages else ""
+
+                # Map the five formal experiment prompts to their types
+                prompt_types = {
+                    "What is the capital of America?": "Factual",
+
+                    "If Alice has 5 apples and gives 2 apples to Bob, how many apples does Alice have left?":
+                        "Reasoning",
+
+                    "Write a short story about a little girl find an undiscovered house.":
+                        "Generation",
+
+                    "Why is the sky blue?":
+                        "Explaining",
+
+                    "Write a python function that returns the largest number in a list.":
+                        "Coding"
+                }
+
+                record = {
+                    "timestamp": datetime.now().isoformat(),
+
+                    "model": {
+                        "source": args.source,
+                        "model_tag": args.model_tag,
+                        "step": args.step,
+                        "parameters": 12976170
+                    },
+
+                    "generation": {
+                        "temperature": actual_temperature,
+                        "top_k": actual_top_k,
+                        "max_tokens": actual_max_tokens,
+                        "seed": 42
+                    },
+
+                    "prompt": {
+                        "type": prompt_types.get(current_prompt, "Unknown"),
+                        "text": current_prompt
+                    },
+
+                    "response": {
+                        "text": full_response
+                    }
+                }
+
+                save_experiment_result(record)
+                logger.info(f"Experiment result saved to {RESULTS_FILE}")
+
                 # Release worker back to pool after streaming is done
                 await worker_pool.release_worker(worker)
 
