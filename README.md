@@ -96,8 +96,10 @@ uv add fastapi uvicorn
 
 Initialize and start web UI
 ```bash
-python -m scripts.chat_web -i sft -g depth2_midtrain -p 8001
-python -m scripts.chat_web -i sft -g depth2_sft -p 8002
+python -m scripts.chat_web -i base -g depth2_eval50 --step 420 -t 0.1 -k 50 -m 128 -p 8001
+python -m scripts.chat_web -i sft -g depth2_midtrain --step 928 -t 0.1 -k 50 -m 128 -p 8002
+python -m scripts.chat_web -i sft -g depth2_sft --step 2868 -t 0.1 -k 50 -m 128 -p 8003
 ```
+The range of `-t` is 0 to 2. In this project, we select 0.1, 0.7, and 1.5
 
-Then, open `http://localhost:8001` and `http://localhost:8002` in two different browser tabs. 
+Then, open `http://localhost:8001`, `http://localhost:8002`, and `http://localhost:8003` in three different browser tabs. 
